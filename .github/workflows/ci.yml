@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ] # should probably enforce some subset of this on feature branches as well, to be discussed w/team
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Test job: Runs all tests and code quality checks
+  test:
+    runs-on: ubuntu-latest
+    # Set up required services (PostgreSQL and Redis) as containers
+    services:
+      # PostgreSQL service container
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: notifications
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # Redis service container
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    # Check out repository code
+    - uses: actions/checkout@v3
+
+    # Set up Python environment with dependency caching
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    # Install all required Python packages including test dependencies
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest-cov flake8 black isort
+
+    # Run code quality checks: formatting, style, and complexity
+    # Developers should be running this locally as a pre-commit hook
+    # https://flake8.pycqa.org/en/latest/
+    # https://pypi.org/project/black/
+    - name: Run linting
+      run: |
+        flake8 . --count --max-complexity=10 --max-line-length=120 --statistics
+        black . --check --diff
+        isort . --check-only --diff
+
+    # Run tests and generate coverage report
+    - name: Run tests with coverage
+      env:
+        DJANGO_DEBUG: 'True'
+        POSTGRES_DB: notifications
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_HOST: localhost
+        REDIS_URL: redis://localhost:6379/0
+      run: |
+        pytest --cov=. --cov-report=xml
+
+    # Upload coverage data to Codecov for analysis
+    # https://about.codecov.io/
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: true
+
+  # Docker job: Builds and pushes all Docker images
+  # Only runs on main branch after tests pass
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    # Log in to DockerHub for pushing images
+    - name: Login to DockerHub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    # Build base Kafka service image
+    # This is the foundation for all Kafka-related services
+    - name: Build and push base Kafka service image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: services/kafka/base.Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/health-notification-kafka-base:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-kafka-base:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-kafka-base:buildcache,mode=max
+
+    # Build main application image
+    # Contains the Django web application and API endpoints
+    - name: Build and push main app
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/health-notification-system:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-system:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-system:buildcache,mode=max
+
+    # Build Kafka consumer image
+    # Processes notifications from Kafka and sends them to users
+    - name: Build and push Kafka consumer
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: services/kafka/consumer.Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/health-notification-consumer:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-consumer:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-consumer:buildcache,mode=max
+
+    # Build Kafka producer image
+    # Generates and publishes notifications to Kafka
+    - name: Build and push Kafka producer
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: services/kafka/producer.Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/health-notification-producer:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-producer:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-producer:buildcache,mode=max
+
+    # Build retry consumer image
+    # Handles failed notifications and implements retry logic
+    - name: Build and push retry consumer
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: services/kafka/retry_consumer.Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/health-notification-retry:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-retry:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/health-notification-retry:buildcache,mode=max

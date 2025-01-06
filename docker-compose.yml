@@ -1,0 +1,197 @@
+services:
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/health-notification-system
+      - static_volume:/health-notification-system/staticfiles
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_DEBUG=True
+      - POSTGRES_DB=notifications
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      - cache_service
+    networks:
+      - notification-network
+
+  db:
+    image: postgres:15-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=notifications
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - notification-network
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - notification-network
+
+  cache_service:
+    build:
+      context: .
+      dockerfile: ./services/cache_service/docker/Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TTL=86400
+    depends_on:
+      - redis
+    networks:
+      - notification-network
+
+#  zookeeper:
+#    image: confluentinc/cp-zookeeper:7.5.3
+#    hostname: zookeeper
+#    container_name: zookeeper
+#    ports:
+#      - "2181:2181"
+#    environment:
+#      ZOOKEEPER_CLIENT_PORT: 2181
+#      ZOOKEEPER_TICK_TIME: 2000
+#    healthcheck:
+#      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#
+#  kafka:
+#    build:
+#      context: ./kafka
+#      dockerfile: Dockerfile
+#    hostname: kafka
+#    container_name: kafka
+#    depends_on:
+#      zookeeper:
+#        condition: service_healthy
+#    ports:
+#      - "9092:9092"
+#      - "29092:29092"
+#    environment:
+#      KAFKA_BROKER_ID: 1
+#      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+#      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092
+#      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+#      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+#      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+#      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+#      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+#    healthcheck:
+#      test: [ "CMD", "nc", "-z", "localhost", "9092" ]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#    volumes:
+#      - kafka_init_scripts:/docker-entrypoint-initdb.d
+#      - kafka_data:/var/lib/kafka/data
+#
+#  kafka-ui:
+#    container_name: kafka-ui
+#    image: provectuslabs/kafka-ui:latest
+#    depends_on:
+#      kafka:
+#        condition: service_healthy
+#    ports:
+#      - "8080:8080"
+#    environment:
+#      KAFKA_CLUSTERS_0_NAME: local
+#      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+#      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+#
+#  base-kafka-service:
+#    image: health-notification-system-base-kafka-service
+#    build:
+#      context: .
+#      dockerfile: services/kafka/base.Dockerfile
+#
+#  notification-producer:
+#    build:
+#      context: .
+#      dockerfile: services/kafka/producer.Dockerfile
+#    depends_on:
+#      kafka:
+#        condition: service_healthy
+#      redis:
+#        condition: service_healthy
+#      base-kafka-service:
+#        condition: service_started
+#    environment:
+#      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+#      REDIS_URL: redis://redis:6379/0
+#      TOPIC_PREFIX: daily_notifications.push
+#    volumes:
+#      - .:/app  # Mount the whole project to ensure imports work correctly
+#
+#  notification-consumer:
+#    build:
+#      context: .
+#      dockerfile: services/kafka/consumer.Dockerfile
+#    depends_on:
+#      kafka:
+#        condition: service_healthy
+#      redis:
+#        condition: service_healthy
+#      base-kafka-service:
+#        condition: service_started
+#    environment:
+#      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+#      REDIS_URL: redis://redis:6379/0
+#      KAFKA_GROUP_ID: notification-consumer-group
+#      RETRY_TOPIC: daily_notifications.retry
+#    volumes:
+#      - .:/app
+#
+#  notification-retry-consumer:
+#    build:
+#      context: .
+#      dockerfile: services/kafka/retry_consumer.Dockerfile
+#    depends_on:
+#      kafka:
+#        condition: service_healthy
+#      redis:
+#        condition: service_healthy
+#      base-kafka-service:
+#        condition: service_started
+#    environment:
+#      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+#      REDIS_URL: redis://redis:6379/0
+#      KAFKA_GROUP_ID: notification-retry-consumer-group
+#      DEAD_LETTER_TOPIC: daily_notifications.dead_letter
+#    volumes:
+#      - .:/app
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_volume:
+  #kafka_init_scripts:
+  #kafka_data:
+networks:
+  notification-network:
+    name: notification-network
