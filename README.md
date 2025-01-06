@@ -53,12 +53,12 @@ Each notification follows this state machine:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> STAGED: Notification Builder\n Creates Message
-    STAGED --> PENDING: Producer Publishes\n to Kafka
-    PENDING --> COMPLETED: Consumer Successfully\n Sends Notification
-    PENDING --> RETRY: Consumer Fails\n to Send
-    RETRY --> PENDING: Retry Producer\n Re-publishes
-    RETRY --> FAILED: Max Retries\n Exceeded
+    [*] --> STAGED: Notification Builder Creates Message
+    STAGED --> PENDING: Producer Publishes to Kafka
+    PENDING --> COMPLETED: Consumer Successfully Sends Notification
+    PENDING --> RETRY: Consumer Fails to Send
+    RETRY --> PENDING: Retry Producer Re-publishes
+    RETRY --> FAILED: Max Retries Exceeded
     COMPLETED --> [*]
     FAILED --> [*]
 
