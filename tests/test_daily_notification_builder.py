@@ -9,6 +9,7 @@ from services.cache_service.NotificationStatus import NotificationStatus
 from users.management.daily_notification_builder import NotificationBuilder
 
 
+
 @pytest.mark.asyncio
 class TestNotificationBuilder:
 
@@ -86,8 +87,8 @@ class TestNotificationBuilder:
         assert notifications[0].message == "your daily message"
         assert notifications[0].status == NotificationStatus.STAGED
 
-    @patch("daily_notification_builder.NotificationBuilder._get_users_batch")
-    @patch("daily_notification_builder.NotificationBuilder._build_notification_payload")
+    @patch("users.management.daily_notification_builder.NotificationBuilder._get_users_batch")
+    @patch("users.management.daily_notification_builder.NotificationBuilder._build_notification_payload")
     async def test_process_all_timezones(self, mock_build_notification, mock_get_users, notification_builder):
         """Test `process_all_timezones` processes users and caches notifications."""
         # Mock user batches and notifications

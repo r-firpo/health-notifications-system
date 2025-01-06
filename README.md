@@ -105,7 +105,8 @@ cd health-notification-system
 2. Set up environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your configuration. You can also just use the 
+# provided default values in the codebase for testing, they should work
 ```
 
 Required environment variables:
@@ -115,8 +116,24 @@ Required environment variables:
 - `REDIS_URL`: Redis connection string
 
 3. Start the services:
+
+The system uses two separate Docker Compose files:
+- `docker-compose.yml`: Main application services (Django, Redis, PostgreSQL)
+- `docker-compose.kafka.yml`: Kafka-related services
+
+Start the main application services first, as Kafka services depend on the shared network and Redis:
+
 ```bash
+# build services 
+docker-compose build
+
+docker-compose -f docker-compose.kafka.yml build
+
+# Start main services
 docker-compose up -d
+
+# Wait for services to be healthy, then start Kafka services
+docker-compose -f docker-compose.kafka.yml up -d
 ```
 
 4. Initialize the database:
@@ -190,18 +207,28 @@ python manage.py generate_test_users --count 50
 # Generate users with specific timezone
 python manage.py generate_test_users --timezone "America/New_York"
 ```
-```
 
 ## Development
 
 ### Running Tests
+1. Install test dependencies:
+```bash
+pip install pytest pytest-django pytest-asyncio pytest-cov pytest-mock
+````
 
 ```bash
 # Run all tests
 pytest
-
 # Run with coverage
 pytest --cov=.
+
+#  Django can find your settings module when 
+#  running tests from the command line. If you don't have your
+#  pyton path set accordingly (like in an IDE) you can try running
+PYTHONPATH=$PYTHONPATH:. pytest
+
+# Run with coverage
+PYTHONPATH=$PYTHONPATH:. pytest --cov=.
 ```
 
 ### Code Quality
